@@ -1,0 +1,395 @@
+
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#10223f">
+<title>VolleyScout</title>
+<style>
+:root {
+  --bg: #0b1425;
+  --panel: #14233b;
+  --line: #30435f;
+  --blue: #3182f6;
+  --text: #f4f7fc;
+  --muted: #9db0ca;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Arial, sans-serif;
+}
+header {
+  padding: 20px 16px;
+  background: #10223f;
+  border-bottom: 1px solid var(--line);
+}
+h1 { margin: 0 0 5px; font-size: 26px; }
+.subtitle { color: var(--muted); font-size: 13px; }
+main { padding: 14px; }
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+button {
+  border: 0;
+  border-radius: 9px;
+  padding: 11px 14px;
+  color: white;
+  font-weight: bold;
+  font-size: 15px;
+  cursor: pointer;
+}
+.undo { background: #315276; }
+.clear { background: #a63845; }
+.hint {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0 0 14px;
+}
+.section-title { font-size: 17px; margin: 18px 0 9px; }
+.horizontal-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  -webkit-overflow-scrolling: touch;
+}
+table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 850px;
+}
+.player-col { width: 150px; }
+.stat-col { width: 100px; }
+th, td {
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 8px 6px;
+  text-align: center;
+  vertical-align: middle;
+}
+th {
+  background: #1c3455;
+  font-size: 12px;
+  height: 44px;
+  position: sticky;
+  top: 0;
+}
+td { min-height: 50px; }
+.name-input {
+  width: 100%;
+  min-width: 0;
+  background: transparent;
+  color: white;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 7px 3px;
+  font-size: 13px;
+}
+.name-input:focus {
+  outline: 1px solid var(--blue);
+  border-color: var(--blue);
+}
+.symbols {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  text-align: left;
+  line-height: 1.6;
+  font-size: 17px;
+  min-height: 25px;
+}
+.stat-buttons {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+}
+.stat-buttons button {
+  padding: 8px 0;
+  width: 28px;
+  border-radius: 6px;
+  font-size: 16px;
+}
+.plus { background: #168451; }
+.minus { background: #bd414d; }
+.neutral { background: #526780; }
+.disabled-cell { color: #60738d; }
+.status {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 12px;
+}
+footer {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 8px 14px 24px;
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>🏐 VolleyScout</h1>
+  <div class="subtitle">Statystyki meczu • Twoja drużyna</div>
+</header>
+
+<main>
+  <div class="actions">
+    <button class="undo" id="undo">↶ Cofnij</button>
+    <button class="clear" id="clear">Wyczyść statystyki</button>
+  </div>
+
+  <p class="hint">
+    Zmień imiona zawodniczek, jeśli chcesz. W dolnej tabeli
+    naciśnij +, − lub o, aby dodać symbol do górnej tabeli.
+    Rozegranie jest dostępne tylko dla pierwszych dwóch zawodniczek.
+  </p>
+
+  <h2 class="section-title">1. Statystyki zawodniczek</h2>
+  <div class="horizontal-scroll">
+    <table id="results"></table>
+  </div>
+
+  <h2 class="section-title">2. Rejestrowanie akcji</h2>
+  <div class="horizontal-scroll">
+    <table id="controls"></table>
+  </div>
+
+  <div class="status" id="status">Dane zapisywane lokalnie na tym urządzeniu.</div>
+</main>
+
+<footer>
+  VolleyScout • Dane pozostają w pamięci tej przeglądarki.
+</footer>
+
+<script>
+const columns = [
+  "Zagrywka", "Przyjęcie", "Obrona",
+  "Blok", "Atak", "Rozegranie"
+];
+
+const STORAGE_KEY = "volleyscout_data_v1";
+
+function newPlayer(index) {
+  return {
+    name: "Zawodniczka " + (index + 1),
+    stats: columns.map(() => [])
+  };
+}
+
+let players = Array.from({ length: 15 }, (_, i) => newPlayer(i));
+let history = [];
+
+try {
+  const saved = localStorage.getItem(STORAGE_KEY);
+  if (saved) {
+    const parsed = JSON.parse(saved);
+    if (Array.isArray(parsed) && parsed.length === 15) {
+      players = parsed.map((p, i) => ({
+        name: typeof p.name === "string" ? p.name : "Zawodniczka " + (i + 1),
+        stats: columns.map((_, j) =>
+          Array.isArray(p.stats?.[j])
+            ? p.stats[j].filter(s => ["+", "−", "o"].includes(s))
+            : []
+        )
+      }));
+    }
+  }
+} catch (e) {
+  console.warn("Nie udało się odczytać zapisanych danych.", e);
+}
+
+function save() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(players));
+    document.getElementById("status").textContent =
+      "✓ Zapisano lokalnie • " + new Date().toLocaleTimeString("pl-PL");
+  } catch (e) {
+    document.getElementById("status").textContent =
+      "Nie udało się zapisać danych w przeglądarce.";
+  }
+}
+
+function createHeader(table) {
+  const thead = document.createElement("thead");
+  const row = document.createElement("tr");
+
+  const playerHead = document.createElement("th");
+  playerHead.className = "player-col";
+  playerHead.textContent = "Zawodniczka";
+  row.appendChild(playerHead);
+
+  columns.forEach((column, j) => {
+    const th = document.createElement("th");
+    th.className = "stat-col";
+    th.textContent = column;
+    row.appendChild(th);
+  });
+
+  thead.appendChild(row);
+  table.appendChild(thead);
+}
+
+function renderResults() {
+  const table = document.getElementById("results");
+  table.replaceChildren();
+  createHeader(table);
+
+  const tbody = document.createElement("tbody");
+
+  players.forEach((player, i) => {
+    const row = document.createElement("tr");
+
+    const nameCell = document.createElement("td");
+    const input = document.createElement("input");
+    input.className = "name-input";
+    input.value = player.name;
+    input.setAttribute("aria-label", "Imię zawodniczki " + (i + 1));
+    input.maxLength = 40;
+    input.addEventListener("input", () => {
+      players[i].name = input.value;
+      save();
+      renderControlsNames();
+    });
+    nameCell.appendChild(input);
+    row.appendChild(nameCell);
+
+    columns.forEach((_, j) => {
+      const cell = document.createElement("td");
+      const symbols = document.createElement("div");
+      symbols.className = "symbols";
+
+      if (j === 5 && i > 1) {
+        cell.className = "disabled-cell";
+        symbols.textContent = "—";
+      } else {
+        symbols.textContent = player.stats[j].join("");
+        symbols.setAttribute(
+          "aria-label",
+          player.stats[j].length + " symboli"
+        );
+      }
+
+      cell.appendChild(symbols);
+      row.appendChild(cell);
+    });
+
+    tbody.appendChild(row);
+  });
+
+  table.appendChild(tbody);
+}
+
+function renderControlsNames() {
+  const inputs = document.querySelectorAll("#controls .player-label");
+  inputs.forEach((el, i) => {
+    el.textContent = players[i].name || ("Zawodniczka " + (i + 1));
+  });
+}
+
+function addSymbol(playerIndex, columnIndex, symbol) {
+  if (columnIndex === 5 && playerIndex > 1) return;
+
+  players[playerIndex].stats[columnIndex].push(symbol);
+  history.push({ playerIndex, columnIndex });
+  save();
+  renderResults();
+}
+
+function renderControls() {
+  const table = document.getElementById("controls");
+  table.replaceChildren();
+  createHeader(table);
+
+  const tbody = document.createElement("tbody");
+
+  players.forEach((player, i) => {
+    const row = document.createElement("tr");
+    const nameCell = document.createElement("td");
+    const name = document.createElement("span");
+    name.className = "player-label";
+    name.textContent = player.name;
+    nameCell.appendChild(name);
+    row.appendChild(nameCell);
+
+    columns.forEach((_, j) => {
+      const cell = document.createElement("td");
+
+      if (j === 5 && i > 1) {
+        cell.className = "disabled-cell";
+        cell.textContent = "—";
+      } else {
+        const group = document.createElement("div");
+        group.className = "stat-buttons";
+
+        [
+          { symbol: "+", cls: "plus", label: "Dodaj plus" },
+          { symbol: "−", cls: "minus", label: "Dodaj minus" },
+          { symbol: "o", cls: "neutral", label: "Dodaj o" }
+        ].forEach(item => {
+          const button = document.createElement("button");
+          button.className = item.cls;
+          button.textContent = item.symbol;
+          button.setAttribute(
+            "aria-label",
+            item.label + " — " + player.name + ", " + columns[j]
+          );
+          button.addEventListener("click", () =>
+            addSymbol(i, j, item.symbol)
+          );
+          group.appendChild(button);
+        });
+
+        cell.appendChild(group);
+      }
+
+      row.appendChild(cell);
+    });
+
+    tbody.appendChild(row);
+  });
+
+  table.appendChild(tbody);
+}
+
+document.getElementById("undo").addEventListener("click", () => {
+  const last = history.pop();
+
+  if (!last) {
+    document.getElementById("status").textContent =
+      "Nie ma akcji do cofnięcia w tej sesji.";
+    return;
+  }
+
+  const stats = players[last.playerIndex].stats[last.columnIndex];
+  stats.pop();
+  save();
+  renderResults();
+});
+
+document.getElementById("clear").addEventListener("click", () => {
+  if (!confirm("Usunąć wszystkie symbole? Imiona zawodniczek zostaną.")) {
+    return;
+  }
+
+  players.forEach(player => {
+    player.stats = columns.map(() => []);
+  });
+
+  history = [];
+  save();
+  renderResults();
+});
+
+renderResults();
+renderControls();
+save();
+</script>
+</body>
+</html>
